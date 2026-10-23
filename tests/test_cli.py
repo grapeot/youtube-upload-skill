@@ -144,3 +144,17 @@ def test_unexpected_error_is_still_one_json_object(home, write_meta, good_meta, 
     monkeypatch.setitem(cli.COMMANDS, "upload", lambda args, home: (_ for _ in ()).throw(RuntimeError("boom")))
     code, out = run_inproc(capsys, "--home", str(home.root), "upload", "--meta", str(p))
     assert code == 1 and out["error"] == "upload failed" and out["error_detail"]["message"] == "boom"
+
+
+def test_setup_without_a_step_is_a_usage_error(home, capsys):
+    code, out = run_inproc(capsys, "--home", str(home.root), "setup")
+    assert code == 2 and out["error"].startswith("usage")
+
+
+def test_status_keeps_fields_when_the_channel_check_fails(home, capsys, fake_service):
+    write_private(home.token, json.dumps(FAKE_TOKEN))
+    fake_service([resp(403, {"error": {"code": 403, "message": "YouTube Data API v3 has not been used",
+                                        "errors": [{"reason": "accessNotConfigured"}]}})])
+    code, out = run_inproc(capsys, "--home", str(home.root), "status")
+    assert code == 1 and out["token_valid"] is True and out["token_present"] is True
+    assert out["error_detail"]["reason"] == "accessNotConfigured"

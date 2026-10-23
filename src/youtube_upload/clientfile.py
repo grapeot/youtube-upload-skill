@@ -18,7 +18,7 @@ DOWNLOAD_GLOB = "client_secret_*.json"
 
 
 def describe(path: Path) -> dict[str, Any]:
-    """{'kind': 'installed'|'web'|None, 'project_id', 'client_id_suffix'} without secrets."""
+    """{'kind': 'installed'|'web'|None, 'project_id', 'client_id_prefix'} without secrets."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError):
@@ -57,6 +57,8 @@ class InstallError(ValueError):
 
 def install(home: Home, source: Path, now: datetime | None = None) -> dict[str, Any]:
     """Copy a Desktop client JSON to <home>/client_secret.json (0600). An existing file is kept as a backup."""
+    if not source.is_file():
+        raise InstallError(f"file not found: {source}")
     info = describe(source)
     if info["kind"] != "installed":
         raise InstallError(

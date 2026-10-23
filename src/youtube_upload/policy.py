@@ -8,6 +8,7 @@ scheduled-publish field appears anywhere else under src/.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 DEFAULT_VISIBILITY = "private"
@@ -54,3 +55,17 @@ def check_insert_body(body: Any) -> None:
     if not isinstance(body, dict) or "status" not in body:
         raise PolicyError("videos.insert body must carry an explicit status part")
     check_status_body(body["status"])
+
+
+_PRIVACY_IN_BODY = re.compile(rb'"privacyStatus"\s*:\s*"([^"]*)"')
+
+
+def check_request_body(body: Any) -> None:
+    """Transport-level backstop: refuse any metadata body that widens visibility or schedules."""
+    if body is None or hasattr(body, "read"):
+        return  # media stream chunks carry no metadata
+    raw = body.encode("utf-8") if isinstance(body, str) else bytes(body)
+    if b'"' + _FORBIDDEN_STATUS_FIELDS[0].encode() + b'"' in raw:
+        raise PolicyError("refusing to send a request that schedules publication")
+    for m in _PRIVACY_IN_BODY.finditer(raw):
+        check_visibility(m.group(1).decode("utf-8", "replace"))

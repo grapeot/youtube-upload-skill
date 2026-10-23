@@ -23,13 +23,57 @@ DAILY_UPLOADS = 100
 RETRYABLE_STATUS = {500, 502, 503, 504}
 
 
+# The only write endpoints the tool may call (method, path). Everything else except GET is refused
+# at the transport, so a code path that reaches another endpoint fails before anything is sent.
+ALLOWED_WRITES = {
+    ("POST", "/upload/youtube/v3/videos"),
+    ("PUT", "/upload/youtube/v3/videos"),          # resumable session chunks and status queries
+    ("POST", "/upload/youtube/v3/thumbnails/set"),
+    ("POST", "/upload/youtube/v3/captions"),
+    ("POST", "/youtube/v3/playlistItems"),
+}
+
+
+class TransportPolicyError(RuntimeError):
+    pass
+
+
+class GuardedHttp:
+    """httplib2-compatible wrapper enforcing ALLOWED_WRITES and the visibility policy on every request."""
+
+    def __init__(self, inner: Any):
+        self._inner = inner
+
+    def request(self, uri, method="GET", body=None, headers=None, **kwargs):
+        from urllib.parse import urlsplit
+
+        from .policy import check_request_body
+
+        m = (method or "GET").upper()
+        if m != "GET":
+            path = urlsplit(uri).path
+            if (m, path) not in ALLOWED_WRITES:
+                raise TransportPolicyError(f"refusing {m} {path}: not one of the tool's write endpoints")
+            check_request_body(body)
+        return self._inner.request(uri, method=method, body=body, headers=headers, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
 def build_service(credentials: Any = None, http: Any = None):
-    """Build the youtube v3 client from the library's bundled discovery document (no network)."""
+    """Build the youtube v3 client from the library's bundled discovery document (no network).
+
+    All traffic goes through GuardedHttp, including the mocked transport used in tests.
+    """
     from googleapiclient.discovery import build
 
-    if http is not None:
-        return build("youtube", "v3", http=http, cache_discovery=False, static_discovery=True)
-    return build("youtube", "v3", credentials=credentials, cache_discovery=False, static_discovery=True)
+    if http is None:
+        import google_auth_httplib2
+        from googleapiclient.http import build_http
+
+        http = google_auth_httplib2.AuthorizedHttp(credentials, http=build_http())
+    return build("youtube", "v3", http=GuardedHttp(http), cache_discovery=False, static_discovery=True)
 
 
 def error_details(exc: BaseException) -> dict[str, Any]:

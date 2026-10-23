@@ -173,3 +173,45 @@ def test_session_browser_controller_opens_in_setup_chrome(monkeypatch, home):
     name = B.register_session_browser(session)
     assert webbrowser.get(name).open("https://accounts.example/consent") is True
     assert seen == ["https://accounts.example/consent"]
+
+
+def test_redact_blanks_client_secrets():
+    snap = {"dialogs": ["OAuth client created Client ID 123-abc.apps.example Client secret GOCSPX-FAKEFAKEFAKE Download JSON"],
+            "fields": [{"label": "Client secret", "value": "anything-at-all"}, {"label": "Name", "value": "keep me"}],
+            "text": "token ya29.FAKE-ACCESS and refresh 1//FAKEREFRESHTOKEN0"}
+    out = console.redact(snap)
+    blob = json.dumps(out)
+    assert "GOCSPX" not in blob and "anything-at-all" not in blob and "ya29.FAKE" not in blob and "1//FAKE" not in blob
+    assert out["fields"][1]["value"] == "keep me" and "Download JSON" in out["dialogs"][0]
+
+
+@pytest.mark.parametrize("text", ["Deleting", "Disabled", "Removal", "Regenerate secret", "Turn off", "Start free trial",
+                                  "Activate", "Close account", "Downgrade", "Destroy"])
+def test_deny_stems(text):
+    with pytest.raises(console.GuardError):
+        console.check_control(text)
+
+
+def test_check_target_uses_the_real_target_and_open_dialogs():
+    with pytest.raises(console.GuardError):
+        console.check_target({"name": "Delete", "dialogs": []})
+    with pytest.raises(console.GuardError, match="dialog"):
+        console.check_target({"name": "Confirm", "dialogs": ["Delete project? This cannot be undone. Cancel Confirm"]})
+    console.check_target({"name": "Confirm", "dialogs": ["Push to production? Cancel Confirm"]})
+
+
+def test_install_client_file_checks(home, tmp_path):
+    out = S.cmd_install_client(home, str(tmp_path / "missing.json"), None)
+    assert out["ok"] is False and "not found" in out["error"]
+    src = client(tmp_path / "d.json", "installed", project="other-project")
+    out = S.cmd_install_client(home, str(src), "wanted-project")
+    assert out["ok"] is False and "belongs to project" in out["error"]
+    out = S.cmd_install_client(home, str(src), None)
+    assert out["ok"] is True and any("trash" in n for n in out["next"])
+
+
+def test_profile_inside_git_repo_is_refused(home, tmp_path):
+    from youtube_upload.paths import ConfigError
+    (tmp_path / "repo" / ".git").mkdir(parents=True)
+    with pytest.raises(ConfigError, match="inside a git repository"):
+        B.session_for(home, profile_dir=str(tmp_path / "repo" / "profile"))

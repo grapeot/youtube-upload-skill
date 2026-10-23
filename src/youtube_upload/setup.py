@@ -128,9 +128,9 @@ def cmd_snapshot(session: B.Session) -> dict[str, Any]:
     return _with_page(session, lambda page: {"ok": True, "page": console.snapshot(page)})
 
 
-def cmd_click(session: B.Session, text: str, role: str | None, exact: bool) -> dict[str, Any]:
+def cmd_click(session: B.Session, text: str, role: str | None) -> dict[str, Any]:
     def act(page):
-        res = console.click(page, text, role, exact)
+        res = console.click(page, text, role)
         return {"ok": True, **res, "page": console.snapshot(page)}
     return _with_page(session, act)
 
@@ -145,6 +145,11 @@ def cmd_fill(session: B.Session, label: str, value: str) -> dict[str, Any]:
 def cmd_install_client(home: Home, file: str | None, project: str | None) -> dict[str, Any]:
     if file:
         source = Path(file).expanduser()
+        if not source.is_file():
+            return {"ok": False, "error": f"file not found: {source}"}
+        found = clientfile.describe(source).get("project_id")
+        if project and found != project:
+            return {"ok": False, "error": f"{source.name} belongs to project {found!r}, not {project!r}"}
     else:
         candidates = [c for c in clientfile.find_downloads() if c["kind"] == "installed"
                       and (project is None or c.get("project_id") == project)]
@@ -155,7 +160,9 @@ def cmd_install_client(home: Home, file: str | None, project: str | None) -> dic
         source = Path(candidates[0]["path"])
     res = clientfile.install(home, source)
     return {"ok": True, "source": str(source), **res,
-            "note": "the downloaded file was copied, not moved; the previous file, if any, is kept as the backup"}
+            "note": "the downloaded file was copied, not moved; the previous file, if any, is kept as the backup",
+            "next": ["ask the human whether to move the downloaded copy to the trash (it holds the client secret)",
+                     "run `yt-upload setup auth`"]}
 
 
 def cmd_auth(home: Home, session: B.Session, timeout: int) -> dict[str, Any]:

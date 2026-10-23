@@ -110,7 +110,8 @@ def readback(service: Any, video_id: str, meta: UploadMeta | None = None, visibi
     if meta.subtitles:
         tracks = list_captions(service, video_id)
         out["captions"] = tracks
-        have = {((t["language"] or "").lower(), t["name"] or "") for t in tracks}
+        have = {((t["language"] or "").lower(), t["name"] or "") for t in tracks
+                if t.get("track_kind") in (None, "standard")}  # ignore YouTube's automatic (ASR) track
         for c in meta.subtitles:
             if (c.language.lower(), c.name) not in have:
                 result["mismatches"].append({"field": "captions", "expected": {"language": c.language, "name": c.name}, "actual": None})

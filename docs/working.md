@@ -15,6 +15,8 @@
 - End-to-end run on a real channel: guided setup (sign-in and consent by the human), then one 60-second 1080p clip uploaded unlisted with chapters, a thumbnail and a caption track. Thumbnail and caption steps succeeded; readback clean once processing finished.
 - Readback: empty tags while processing are reported as unverified instead of a mismatch. Offline suite: 188 passed.
 
+- Independent review fixes: secrets redacted from console snapshots; click guard checks the real click target and open dialogs, uses word stems, no substring matching; profile must be outside git repos and only the profile dir is chmod-ed; own-browser check through the port's listening pid; locked read-modify-write ledger; session URL recorded from the initiation response; steps marked started; ASR caption tracks ignored; expired sessions marked; transport allowlist (`GuardedHttp`); AST-based source scan (f-strings, concatenation). Offline suite: 217 passed.
+
 ## Lessons Learned
 
 - On macOS, closing the last Chrome window leaves the process running with zero tabs; Playwright's connect_over_cdp then fails with "Browser context management is not supported". Open a tab through the DevTools HTTP endpoint (PUT /json/new) first.

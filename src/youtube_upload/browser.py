@@ -14,6 +14,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import time
 import urllib.parse
 import urllib.request
@@ -22,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .paths import Home
+from .paths import ConfigError, Home, enclosing_git_repo
 
 DEFAULT_PORT = 9351
 CONSOLE_URL = "https://console.cloud.google.com/"
@@ -46,8 +47,11 @@ class Session:
 
 def session_for(home: Home, port: int | None = None, profile_dir: str | None = None) -> Session:
     port = port or int(os.environ.get("YT_UPLOAD_CDP_PORT", DEFAULT_PORT))
-    prof = profile_dir or os.environ.get("YT_UPLOAD_PROFILE_DIR") or str(home.root / "browser-profile")
-    return Session(port=port, profile_dir=Path(prof).expanduser())
+    prof = Path(profile_dir or os.environ.get("YT_UPLOAD_PROFILE_DIR") or str(home.root / "browser-profile")).expanduser()
+    repo = enclosing_git_repo(prof)
+    if repo is not None:  # the profile holds a signed-in Google session
+        raise ConfigError(f"browser profile {prof} is inside a git repository ({repo}); put it outside any repository")
+    return Session(port=port, profile_dir=prof)
 
 
 def port_in_use(port: int) -> bool:
@@ -83,10 +87,11 @@ def launch(session: Session, url: str = CONSOLE_URL) -> dict[str, Any]:
     chrome = find_chrome()
     if not chrome:
         return {"ok": False, "error": "Chrome not found; set YT_UPLOAD_CHROME to its executable"}
+    created = not session.profile_dir.exists()
     session.profile_dir.mkdir(parents=True, exist_ok=True)
-    os.chmod(session.profile_dir, 0o700)
-    os.chmod(session.profile_dir.parent, 0o700)
-    log_path = session.profile_dir.parent / "browser.log"
+    if created or session.profile_dir.stat().st_uid == os.getuid():
+        os.chmod(session.profile_dir, 0o700)  # only the profile itself; never its parent
+    log_path = session.profile_dir / "yt-upload-browser.log"
     with open(log_path, "ab") as log:
         proc = subprocess.Popen(
             [
@@ -124,15 +129,43 @@ def browser_matches(cmdlines: list[str], port: int, profile_dir: Path) -> bool:
     return any(want_port in line.split() and any(pt.search(line) for pt in pats) for line in cmdlines)
 
 
+def listening_pids(port: int) -> list[int] | None:
+    """PIDs listening on 127.0.0.1:<port>, or None when lsof is unavailable."""
+    exe = shutil.which("lsof")
+    if exe is None:
+        return None
+    try:
+        out = subprocess.run([exe, "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return [int(x) for x in out.split() if x.isdigit()]
+
+
+def _cmdlines(pids: list[int] | None) -> list[str]:
+    if pids is not None:
+        lines = []
+        for pid in pids:
+            r = subprocess.run(["ps", "-ww", "-o", "args=", "-p", str(pid)], capture_output=True, text=True, timeout=10)
+            lines += r.stdout.splitlines()
+        return lines
+    flags = ["-axww"] if sys.platform == "darwin" else ["-eww"]
+    return subprocess.run(["ps", *flags, "-o", "args="], capture_output=True, text=True, timeout=10).stdout.splitlines()
+
+
 def verify_own_browser(session: Session) -> dict[str, Any]:
-    """Refuse to drive a Chrome that this tool did not start with this profile."""
+    """Refuse to drive a Chrome that this tool did not start with this profile.
+
+    The process that owns the listening port (via lsof when available) must carry both the
+    debugging-port flag and this profile directory on its command line.
+    """
     if not port_in_use(session.port):
         return {"ok": False, "error": "no setup browser is running; run `yt-upload setup browser`"}
     try:
-        out = subprocess.run(["ps", "-axww", "-o", "args="], capture_output=True, text=True, timeout=10).stdout
+        lines = _cmdlines(listening_pids(session.port) or None)
     except (OSError, subprocess.SubprocessError) as e:
         return {"ok": False, "error": f"cannot list processes to verify the browser: {type(e).__name__}"}
-    if browser_matches(out.splitlines(), session.port, session.profile_dir):
+    if browser_matches(lines, session.port, session.profile_dir):
         return {"ok": True}
     return {"ok": False, "error": f"the browser on port {session.port} was not started with the setup profile; "
             "refusing to drive it"}

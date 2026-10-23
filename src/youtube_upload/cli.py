@@ -65,7 +65,6 @@ def build_parser() -> argparse.ArgumentParser:
     k = ss.add_parser("click", help="click one visible control by its label (guarded)")
     k.add_argument("--text", required=True)
     k.add_argument("--role", choices=["button", "link", "menuitem", "option", "radio", "tab", "checkbox", "combobox"])
-    k.add_argument("--contains", action="store_true", help="match the label as a substring")
     f = ss.add_parser("fill", help="type into one visible field by its label (guarded)")
     f.add_argument("--label", required=True)
     f.add_argument("--value", required=True)
@@ -115,7 +114,16 @@ def cmd_status(args, home) -> dict[str, Any]:
         out.update({"token_valid": False, "needs_auth": True, "error": str(e)})
         return out
     out["token_valid"] = True
-    out["channel"] = channel_preflight(service)
+    try:
+        out["channel"] = channel_preflight(service)
+    except Exception as e:  # noqa: BLE001 - keep the fields collected so far
+        from .api import error_details
+        from .upload import UploadRefused
+
+        out["error"] = str(e) if isinstance(e, UploadRefused) else "channel check failed"
+        if not isinstance(e, UploadRefused):
+            out["error_detail"] = error_details(e)
+        return out
     out["ok"] = True
     return out
 
@@ -185,7 +193,7 @@ def cmd_setup(args, home) -> dict[str, Any]:
     if sc == "snapshot":
         return S.cmd_snapshot(session)
     if sc == "click":
-        return S.cmd_click(session, args.text, args.role, not args.contains)
+        return S.cmd_click(session, args.text, args.role)
     if sc == "fill":
         return S.cmd_fill(session, args.label, args.value)
     if sc == "install-client":
@@ -206,6 +214,10 @@ def run(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd is None:
         _emit({"ok": False, "error": f"usage: a command is required ({', '.join(COMMANDS)})"})
+        return 2
+    if args.cmd == "setup" and args.setup_cmd is None:
+        _emit({"command": "setup", "ok": False, "error": "usage: setup needs a step (browser, status, plan, goto, "
+               "snapshot, click, fill, install-client, auth)"})
         return 2
     from .api import error_details
     from .auth import AuthError

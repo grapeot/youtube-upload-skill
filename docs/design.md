@@ -65,7 +65,7 @@ These are invariants. No change may break them.
 2. **Dry-run by default.** `upload` without `--execute` makes no network call. The caller must have the owner's approval for this specific video before passing `--execute`.
 3. **One upload per file.** The sha256 of the video file is recorded in the ledger. A second `--execute` on the same file is refused; `--resume` continues an interrupted upload or unfinished follow-up steps, and only `--new-upload` uploads the same file again.
 4. **Credentials stay private.** The OAuth client secret, the refresh token and the ledger (which holds resumable session URLs) live in the config directory (mode 0700, files 0600), never inside a git repository. No command prints a token, a client secret or a session URL.
-5. **Narrow write surface.** The tool calls exactly these write methods: `videos.insert`, `thumbnails.set`, `captions.insert`, `playlistItems.insert`. It never deletes, never updates existing videos, never touches channel settings and never creates playlists. A source-scan test enforces the forbidden calls.
+5. **Narrow write surface.** The tool calls exactly these write methods: `videos.insert`, `thumbnails.set`, `captions.insert`, `playlistItems.insert`. It never deletes, never updates existing videos, never touches channel settings and never creates playlists. Two layers enforce this: a source-scan test, and a transport wrapper (`api.GuardedHttp`) through which every request passes, which refuses any non-GET request outside those endpoints and any request body that names a disallowed visibility or a publish time.
 6. **Disclosures are explicit.** `made_for_kids` and `contains_synthetic_media` have no defaults; metadata without them is rejected.
 7. **Errors are passed through.** HTTP status, reason and message from Google are returned in the JSON, not replaced with a generic message.
 
@@ -76,7 +76,8 @@ The one-time Cloud console configuration is the hardest part for most people, so
 - A dedicated Chrome profile (`<home>/browser-profile`, 0700) and a debugging port bound to 127.0.0.1. Before every action the tool checks that the Chrome on that port was started with that profile; it never attaches to the person's everyday browser.
 - The human signs in. Google sign-in, account and consent pages are read-only for the tool: it neither types nor clicks there, and does not scrape them. Nothing reads, prints or exports cookies or storage.
 - The agent works through small primitives instead of a hard-coded script: `goto STEP --project ID` opens a known console URL with the project pinned in the query string (so a stale project selector cannot redirect it), `snapshot` returns headings, buttons with their disabled state, fields and alerts, `click --text` and `fill --label` act on exactly one visible control. Every action is followed by a fresh snapshot.
-- Guards: only `console.cloud.google.com` is driven; controls whose label matches delete, remove, disable, reset, revoke, billing, payment, upgrade, back to testing, make internal and similar are refused; password fields are refused.
+- Guards: only `console.cloud.google.com` is driven; the label checked is the accessible name of the element that actually receives the click (its closest interactive ancestor, including `aria-labelledby`, `title` and `value`), matched against word stems (delet, remov, disabl, reset, revok, regenerat, billing, payment, upgrad, free trial, activat, back to testing, make internal and similar); nothing is clicked while a visible dialog mentions one of them; matching is exact, never by substring; password fields are refused. Snapshots are scrubbed of OAuth client secrets and tokens before they are printed, because the console shows a new client's secret in plain text.
+- The browser profile holds a signed-in Google session: it must be outside any git repository, and the tool only tightens permissions on the profile directory itself. When setup is done, quit the setup Chrome; while it runs, any local process can reach its debugging port.
 - The client JSON is installed by copying (the download stays where it is); a replaced `client_secret.json` is renamed to a timestamped backup, never deleted. Only a Desktop (`installed`) client is accepted.
 - If the human closes the window, Chrome on macOS keeps running without windows and CDP attach fails; the tool detects that there are no tabs and opens a new window. If Chrome has quit, `setup browser` relaunches it with the same profile, so the sign-in survives.
 
@@ -93,7 +94,7 @@ The one-time Cloud console configuration is the hardest part for most people, so
 
 ## Things YouTube decides, not the tool
 
-- Videos longer than 15 minutes need a phone-verified channel. `status` reports `long_uploads_status`; `upload --execute` refuses a long video when it is not `allowed`.
+- Videos longer than 15 minutes need a phone-verified channel. `status` reports `long_uploads_status`; `upload --execute` refuses a long video when it is not `allowed`. The duration comes from `ffprobe`; without it the check cannot run and the dry-run says so.
 - Custom thumbnails need a verified channel. A failed `thumbnails.set` is reported as a failed step, the rest of the run continues.
 - `defaultAudioLanguage` is not listed among the writable fields of `videos.insert`; the tool sends it and the readback reports whether it stuck.
 - Chapters are parsed by YouTube from the description: the first timestamp must be 00:00, there must be at least three, ascending, each at least 10 seconds long.

@@ -28,12 +28,36 @@ STEPS: dict[str, dict[str, str]] = {
 }
 ORDER = ("project", "api", "branding", "audience", "clients")
 
-# Controls the tool refuses to touch, matched against the control's visible text and label.
+# Controls the tool refuses to touch, matched against the control's accessible name, the text of
+# its interactive ancestor, and any open dialog. Stems catch inflections ("Deleting", "Disabled").
 DENY = re.compile(
-    r"\b(delete|remove|disable|shut\s*down|reset|revoke|rotate|billing|payment|upgrade|"
-    r"back to testing|make internal|transfer|leave|unlink|clear)\b",
+    r"(\bdelet|\bremov|\bdisabl|\bshut\s*down|\breset|\brevok|\brotat|\bregenerat|\bbilling|\bpayment|"
+    r"\bupgrad|\bdowngrad|\bfree trial|\bactivat|\bdeactivat|\bturn off|\bclose account|\bback to testing|"
+    r"\bmake internal|\btransfer|\bleave\b|\bunlink|\bclear\b|\bdestroy|\bpurchas|\bbuy\b)",
     re.IGNORECASE,
 )
+# Secrets the console can show in plain text (the "OAuth client created" dialog, client detail pages).
+_SECRET = re.compile(r"GOCSPX-[A-Za-z0-9_-]+|ya29\.[A-Za-z0-9_.-]+|1//[A-Za-z0-9_-]{10,}")
+_SECRET_AFTER_LABEL = re.compile(r"(client secret\W{0,5}\s*)(\S+)", re.IGNORECASE)
+REDACTED = "[redacted]"
+
+
+def redact(value: Any) -> Any:
+    """Recursively blank out OAuth secrets in a snapshot before it is printed."""
+    if isinstance(value, str):
+        value = _SECRET.sub(REDACTED, value)
+        return _SECRET_AFTER_LABEL.sub(lambda m: m.group(1) + REDACTED, value)
+    if isinstance(value, list):
+        return [redact(v) for v in value]
+    if isinstance(value, dict):
+        out = {k: redact(v) for k, v in value.items()}
+        label = str(value.get("label", "")).lower()
+        if "secret" in label and "value" in out:
+            out["value"] = REDACTED
+        return out
+    return value
+
+
 _PROJECT_ID = re.compile(r"^[a-z][a-z0-9-]{4,61}[a-z0-9]$")
 
 
@@ -110,7 +134,7 @@ def snapshot(page) -> dict[str, Any]:
         info["title"] = page.title()
         return info  # do not scrape sign-in pages
     info.update(page.evaluate(_SNAPSHOT_JS))
-    return info
+    return redact(info)
 
 
 _ROLES = ("button", "link", "menuitem", "option", "radio", "tab", "checkbox", "combobox")
@@ -138,12 +162,36 @@ def find_control(page, text: str, role: str | None = None, exact: bool = True):
     raise GuardError(f"no visible control named {text!r}")
 
 
-def click(page, text: str, role: str | None = None, exact: bool = True) -> dict[str, Any]:
+# Accessible name of the element that actually receives the click (its closest interactive
+# ancestor), computed from aria-labelledby, aria-label, title, value and text, plus the text of
+# every visible dialog, so a harmless inner span cannot hide a destructive button or dialog.
+_TARGET_JS = r"""el => {
+  const t = el.closest('button,a,[role=button],[role=menuitem],[role=option],[role=tab],[role=radio],[role=checkbox],[role=combobox],input,label') || el;
+  const byIds = (t.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+    .map(id => { const n = document.getElementById(id); return n ? n.innerText : ''; }).join(' ');
+  const name = [byIds, t.getAttribute('aria-label'), t.getAttribute('title'), t.value, t.innerText]
+    .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  const vis = d => { const r = d.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const dialogs = [...document.querySelectorAll('[role=dialog],[role=alertdialog]')].filter(vis)
+    .map(d => (d.innerText || '').replace(/\s+/g, ' ').slice(0, 2000));
+  const own = el.closest('[role=dialog],[role=alertdialog]');
+  return {name, dialogs, in_dialog: !!own};
+}"""
+
+
+def check_target(info: dict[str, Any]) -> None:
+    check_control(info.get("name", ""))
+    for d in info.get("dialogs", []):
+        m = DENY.search(d)
+        if m:
+            raise GuardError(f"a dialog on the page mentions {m.group(0)!r}; refusing to click while it is open")
+
+
+def click(page, text: str, role: str | None = None) -> dict[str, Any]:
     check_page(page.url)
     check_control(text)
-    target = find_control(page, text, role, exact)
-    label = " ".join(filter(None, [target.get_attribute("aria-label") or "", target.inner_text() or ""]))
-    check_control(label)
+    target = find_control(page, text, role, exact=True)
+    check_target(target.evaluate(_TARGET_JS))
     target.click(timeout=10000)
     page.wait_for_timeout(1500)
     return {"clicked": text}
@@ -156,6 +204,7 @@ def fill(page, label: str, value: str) -> dict[str, Any]:
     if len(hits) != 1:
         raise GuardError(f"{len(hits)} visible fields labelled {label!r}; need exactly one")
     field = hits[0]
+    check_target(field.evaluate(_TARGET_JS))
     if (field.get_attribute("type") or "").lower() == "password":
         raise GuardError("refusing to type into a password field")
     field.fill(value, timeout=10000)

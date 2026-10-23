@@ -1,9 +1,7 @@
 """Static guarantees about the source tree (see AGENTS.md invariants 2 and 3)."""
 
 import ast
-import io
 import re
-import tokenize
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "youtube_upload"
@@ -26,20 +24,28 @@ FORBIDDEN_CALLS = [
 ALLOWED_WRITES = {"videos().insert", "thumbnails().set", "captions().insert", "playlistItems().insert"}
 
 
+def _string_values(tree: ast.AST):
+    """Every string the code can produce literally: constants (implicit concatenation is already
+    merged by the parser), the literal parts of f-strings joined together, and both sides of a
+    `"a" + "b"` concatenation of constants."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes)):
+            yield node.value if isinstance(node.value, str) else node.value.decode("latin-1"), node.lineno
+        elif isinstance(node, ast.JoinedStr):
+            yield "".join(v.value for v in node.values if isinstance(v, ast.Constant)), node.lineno
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add) \
+                and all(isinstance(x, ast.Constant) and isinstance(x.value, str) for x in (node.left, node.right)):
+            yield node.left.value + node.right.value, node.lineno
+
+
 def scan_visibility(text: str) -> list[str]:
-    """Problems if `text` names the public visibility as a string literal or mentions the publish-time field."""
+    """Problems if `text` names the public visibility as a string or mentions the publish-time field."""
     found = []
     if "publishat" in text.lower():
         found.append("mentions the scheduled-publish field")
-    for tok in tokenize.generate_tokens(io.StringIO(text).readline):
-        if tok.type != tokenize.STRING:
-            continue
-        try:
-            value = ast.literal_eval(tok.string)
-        except (ValueError, SyntaxError):  # f-strings and similar: check the raw text
-            value = tok.string
-        if isinstance(value, (str, bytes)) and re.fullmatch(r"\W*public\W*", str(value), re.IGNORECASE):
-            found.append(f"string literal {tok.string} at line {tok.start[0]}")
+    for value, line in _string_values(ast.parse(text)):
+        if re.fullmatch(r"\W*public\W*", value, re.IGNORECASE):
+            found.append(f"string {value!r} at line {line}")
     return found
 
 
@@ -54,6 +60,9 @@ def test_scanner_detects_violations():
     assert scan_visibility("x = 'Public'\n")
     assert scan_visibility('body["status"]["publishAt"] = t\n')
     assert scan_visibility('x = "publishat"\n')
+    assert scan_visibility('x = f"public"\n')
+    assert scan_visibility('x = "pub" "lic"\n')
+    assert scan_visibility('x = "pub" + "lic"\n')
     assert not scan_visibility('x = "publish it in Studio"\ny = "private"\n# public is not allowed\n')
 
 

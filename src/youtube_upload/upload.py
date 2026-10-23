@@ -110,6 +110,23 @@ def channel_preflight(service: Any) -> dict[str, Any]:
     }
 
 
+class _SessionRecorder:
+    """httplib2-compatible wrapper that reports the Location of a resumable-session initiation."""
+
+    def __init__(self, inner: Any, on_session: Callable[[str], None]):
+        self._inner = inner
+        self._on_session = on_session
+
+    def request(self, uri, method="GET", body=None, headers=None, **kwargs):
+        resp, content = self._inner.request(uri, method=method, body=body, headers=headers, **kwargs)
+        if method == "POST" and getattr(resp, "status", None) == 200 and "location" in resp:
+            self._on_session(resp["location"])
+        return resp, content
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
 def _insert(service: Any, meta: UploadMeta, body: dict[str, Any], entry: dict[str, Any], book: Ledger,
             opts: Options, resume_uri: str | None) -> dict[str, Any]:
     from googleapiclient.errors import HttpError
@@ -126,16 +143,20 @@ def _insert(service: Any, meta: UploadMeta, body: dict[str, Any], entry: dict[st
         request.resumable_uri = resume_uri
         request._in_error_state = True  # noqa: SLF001 - documented resume path of the client library
 
-    def remember() -> None:
-        if request.resumable_uri and entry.get("session_uri") != request.resumable_uri:
-            book.update(entry, session_uri=request.resumable_uri)
+    def remember(uri: str | None = None) -> None:
+        uri = uri or request.resumable_uri
+        if uri and entry.get("session_uri") != uri:
+            book.update(entry, session_uri=uri)
 
+    # The library starts the session and sends the first chunk inside one next_chunk() call; record
+    # the session URL from the initiation response itself, so a crash during the first chunk can resume.
+    recorder = _SessionRecorder(request.http, remember)
     response = None
     retries = 0
     size = max(media.size() or 1, 1)
     while response is None:
         try:
-            status, response = request.next_chunk()
+            status, response = request.next_chunk(http=recorder)
             retries = 0
             remember()
             if status is not None:
@@ -143,6 +164,7 @@ def _insert(service: Any, meta: UploadMeta, body: dict[str, Any], entry: dict[st
         except Exception as e:  # noqa: BLE001 - classified below
             remember()
             if resume_uri and isinstance(e, HttpError) and getattr(e.resp, "status", None) in (404, 410):
+                book.update(entry, state=L.EXPIRED, session_uri=None)
                 raise UploadRefused(
                     "the recorded upload session has expired; start again with --new-upload",
                     error_detail=error_details(e),
@@ -169,6 +191,8 @@ def _caption(service: Any, caption, video_id: str, retrying: bool) -> dict[str, 
 
     if retrying:  # a previous attempt may have landed; do not add a second track
         for t in list_captions(service, video_id):
+            if t.get("track_kind") not in (None, "standard"):
+                continue  # YouTube's automatic (ASR) track is not the owner's caption
             if (t["language"] or "").lower() == caption.language.lower() and (t["name"] or "") == caption.name:
                 return {"id": t["id"], "already_present": True}
     body = {"snippet": {"videoId": video_id, "language": caption.language, "name": caption.name, "isDraft": False}}
@@ -200,6 +224,7 @@ def run_follow_ups(service: Any, meta: UploadMeta, video_id: str, entry: dict[st
         if previous == "done":
             results.append({"step": name, "ok": True, "skipped": "done in an earlier run"})
             continue
+        book.set_step(entry, name, "started")
         try:
             detail = _with_retries(lambda attempt: fn(previous is not None or attempt > 0), opts, STEP_RETRIES)
             book.set_step(entry, name, "done")
@@ -257,7 +282,12 @@ def execute(meta: UploadMeta, service_factory: Callable[[], Any], book: Ledger, 
                         else "rerun with --execute --new-upload",
             })
             return result
-        book.update(entry, state=L.UPLOADED, video_id=response["id"], session_uri=None)
+        video_id = response.get("id") if isinstance(response, dict) else None
+        if not video_id:
+            result.update({"error": "videos.insert completed without a video ID", "response": response,
+                           "ledger": public_view(entry), "next": "check YouTube Studio before retrying"})
+            return result
+        book.update(entry, state=L.UPLOADED, video_id=video_id, session_uri=None)
 
     video_id = entry["video_id"]
     steps = run_follow_ups(service, meta, video_id, entry, book, opts)

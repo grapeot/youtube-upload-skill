@@ -12,7 +12,7 @@ from youtube_upload.meta import load_meta
 from youtube_upload.policy import PolicyError
 from youtube_upload.upload import Options, UploadRefused, _insert, execute
 
-SESSION = "https://upload.example.invalid/session-1"
+SESSION = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&upload_id=TEST-SESSION-1"
 CHANNEL = resp(200, {"items": [{"id": "UC_TEST_CHANNEL", "snippet": {"title": "Test channel"},
                                 "status": {"longUploadsStatus": "allowed"}}]})
 
@@ -291,3 +291,107 @@ def test_entry_marked_deleted_does_not_block_a_new_upload(meta, book, opts):
     book.update(entry, state="deleted", video_id="VID000")
     out, _ = run(meta, book, opts, [CHANNEL, *upload_ok(), *follow_ups_ok(), *readback_ok(meta)])
     assert out["ok"] is True and out["mode"] == "new"
+
+
+def test_asr_track_is_not_taken_for_the_owners_caption(meta, book, opts):
+    entry = book.start(file_sha256(meta.video), meta.video, 256, meta.title, "private")
+    meta.subtitles[0].name = ""
+    book.update(entry, state=L.UPLOADED, video_id="VID123",
+                steps={"thumbnail": "done", "caption:en": "failed", "playlist": "done"})
+    opts.resume = True
+    asr = resp(200, {"items": [{"id": "ASR1", "snippet": {"language": "en", "name": "", "trackKind": "asr"}}]})
+    readback = [video_item(meta),
+                resp(200, {"items": [{"id": "ASR1", "snippet": {"language": "en", "name": "", "trackKind": "asr"}},
+                                     {"id": "CAP2", "snippet": {"language": "en", "name": "", "trackKind": "standard"}}]}),
+                resp(200, {"items": [{"id": "PLI1"}]})]
+    out, http = run(meta, book, opts, [CHANNEL, asr, resp(200, {"id": "CAP2"}), *readback])
+    cap = [s for s in out["steps"] if s["step"].startswith("caption")][0]
+    assert cap.get("already_present") is None and cap["id"] == "CAP2"
+    assert out["ok"] is True, out
+
+
+def test_step_marked_started_is_checked_before_retrying(meta, book, opts):
+    entry = book.start(file_sha256(meta.video), meta.video, 256, meta.title, "private")
+    # a crash right after captions.insert succeeded leaves the step "started"
+    book.update(entry, state=L.UPLOADED, video_id="VID123",
+                steps={"thumbnail": "done", "caption:en:English": "started", "playlist": "done"})
+    opts.resume = True
+    existing = resp(200, {"items": [{"id": "CAP1", "snippet": {"language": "en", "name": "English", "trackKind": "standard"}}]})
+    out, http = run(meta, book, opts, [CHANNEL, existing, *readback_ok(meta)])
+    assert [s for s in out["steps"] if s["step"].startswith("caption")][0]["already_present"] is True
+
+
+class _Crash(BaseException):
+    pass
+
+
+def test_session_url_is_recorded_before_the_first_chunk(meta, book, opts):
+    from googleapiclient.http import HttpMockSequence
+
+    class CrashOnChunk(HttpMockSequence):
+        def request(self, uri, method="GET", body=None, headers=None, **kw):
+            if method == "PUT":
+                raise _Crash()  # the process dies while the first chunk is in flight
+            return super().request(uri, method, body, headers, **kw)
+
+    from youtube_upload.api import build_service
+    service = build_service(http=CrashOnChunk([CHANNEL, resp(200, location=SESSION)]))
+    with pytest.raises(_Crash):
+        execute(meta, lambda: service, book, opts, 310.0)
+    assert Ledger(book.path).latest(file_sha256(meta.video))["session_uri"] == SESSION
+
+
+def test_expired_session_is_marked_in_the_ledger(meta, book, opts):
+    entry = book.start(file_sha256(meta.video), meta.video, 256, meta.title, "private")
+    book.update(entry, session_uri=SESSION)
+    opts.resume = True
+    with pytest.raises(UploadRefused):
+        run(meta, book, opts, [CHANNEL, resp(410, {"error": {"code": 410, "message": "Gone"}})])
+    e = Ledger(book.path).latest(file_sha256(meta.video))
+    assert e["state"] == L.EXPIRED and e["session_uri"] is None
+
+
+def test_insert_response_without_id(meta, book, opts):
+    out, _ = run(meta, book, opts, [CHANNEL, resp(200, location=SESSION), resp(200, {"kind": "youtube#video"})])
+    assert out["ok"] is False and "without a video ID" in out["error"]
+
+
+def test_concurrent_ledgers_do_not_erase_each_other(meta, book, tmp_path):
+    a, b = Ledger(book.path), Ledger(book.path)
+    ea = a.start("hash-a", meta.video, 1, "a", "private")
+    eb = b.start("hash-b", meta.video, 1, "b", "private")
+    a.update(ea, state=L.UPLOADED, video_id="VA")
+    fresh = Ledger(book.path)
+    assert fresh.latest("hash-a")["state"] == L.UPLOADED and fresh.latest("hash-b") is not None
+
+
+@pytest.mark.parametrize("method,url,body", [
+    ("DELETE", "https://youtube.googleapis.com/youtube/v3/videos?id=X", None),
+    ("PUT", "https://youtube.googleapis.com/youtube/v3/videos?part=status", '{"id": "X"}'),
+    ("POST", "https://youtube.googleapis.com/youtube/v3/playlists?part=snippet", "{}"),
+    ("POST", "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable", '{"status": {"privacyStatus": "pub' 'lic"}}'),
+    ("POST", "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable", '{"status": {"privacyStatus": "private", "publish' 'At": "2030"}}'),
+])
+def test_transport_refuses_everything_outside_the_write_surface(method, url, body):
+    from googleapiclient.http import HttpMockSequence
+
+    from youtube_upload.api import GuardedHttp, TransportPolicyError
+    from youtube_upload.policy import PolicyError
+
+    inner = HttpMockSequence([resp(200, {})])
+    with pytest.raises((TransportPolicyError, PolicyError)):
+        GuardedHttp(inner).request(url, method=method, body=body)
+    assert inner.request_sequence == []
+
+
+def test_transport_allows_reads_and_the_four_writes():
+    from googleapiclient.http import HttpMockSequence
+
+    from youtube_upload.api import GuardedHttp
+
+    inner = HttpMockSequence([resp(200, {})] * 3)
+    g = GuardedHttp(inner)
+    g.request("https://youtube.googleapis.com/youtube/v3/videos?id=X")
+    g.request("https://www.googleapis.com/upload/youtube/v3/captions?part=snippet", method="POST", body='{"snippet": {}}')
+    g.request(SESSION, method="PUT", body=b"\x00" * 10)
+    assert len(inner.request_sequence) == 3

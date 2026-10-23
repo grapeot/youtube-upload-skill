@@ -61,6 +61,8 @@ Rules for this part:
 - If "Publish app" stays disabled with a pointer to Branding, read Branding and Data Access: a missing app name or contact email, or restricted or sensitive scopes left over from earlier use (which then require home page and privacy policy links), are the usual causes.
 - The tool refuses delete, remove, disable, reset and billing controls. Do not look for ways around that.
 - If a command returns `reopened_window: true`, the human had closed the window; the sign-in normally survives. If it says the browser is not running, run `setup browser` again.
+- Snapshots redact client secrets and tokens; never try to read them some other way.
+- When setup is finished, ask the human to quit the setup Chrome (it keeps a signed-in session and an open local debugging port) and whether to move the downloaded client JSON in ~/Downloads to the trash.
 
 ## Metadata format
 
@@ -131,7 +133,7 @@ Every command prints exactly one JSON object to stdout, including on errors; pro
 
 - `ok`: true only when the upload, every follow-up step and the readback all succeeded.
 - `mode`: `new`, `resume_session` or `follow_ups`.
-- `steps[]`: `{step, ok, error?}`; a failed step does not stop the others, and `--resume` retries only failed or missing steps (a caption or playlist step that may have landed is checked before it is retried, so no duplicates).
+- `steps[]`: `{step, ok, error?}`; a failed step does not stop the others, and `--resume` retries only failed or missing steps (a step is marked started before it runs; a caption or playlist step that may have landed is checked against the video before it is retried, ignoring YouTube's automatic caption track).
 - `readback`: `mismatches` (present and different), `unverified` (the API did not return the field), `not_applied` (best-effort fields such as `audio_language`, with how to fix them in Studio). Right after an upload, while processing is still running, tags can come back empty; they are listed as `unverified` then, and a later `readback` shows them. `contains_synthetic_media` is not returned by `videos.list`, so it is always `unverified`: ask the owner to confirm the disclosure in Studio.
 - On an insert failure: `error_detail` carries Google's status, reason and message; `next` says whether to `--resume` or `--new-upload`.
 - Refusals (duplicate, interrupted upload, long video on an unverified channel, no channel) come back as `ok: false` with an `error` explaining the flag to use.
