@@ -48,6 +48,32 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser("categories", help="list assignable video categories (read-only)")
     c.add_argument("--region", default="US", help="ISO 3166-1 region code (default US)")
+
+    s = sub.add_parser("setup", help="guided one-time Google Cloud setup in a visible Chrome")
+    s.add_argument("--port", type=int, help="debugging port (default $YT_UPLOAD_CDP_PORT or 9351)")
+    s.add_argument("--profile-dir", help="Chrome profile (default <home>/browser-profile)")
+    ss = s.add_subparsers(dest="setup_cmd", parser_class=_Parser)
+    b = ss.add_parser("browser", help="launch the visible setup Chrome")
+    b.add_argument("--project", help="open this project's dashboard")
+    ss.add_parser("status", help="local files, downloaded clients, browser and sign-in state (read-only)")
+    pl = ss.add_parser("plan", help="the setup steps and their console URLs")
+    pl.add_argument("--project")
+    g = ss.add_parser("goto", help="open a setup step page and read it back")
+    g.add_argument("step", choices=["project", "api", "branding", "audience", "clients"])
+    g.add_argument("--project", required=True, help="Google Cloud project ID")
+    ss.add_parser("snapshot", help="read the current setup page (read-only)")
+    k = ss.add_parser("click", help="click one visible control by its label (guarded)")
+    k.add_argument("--text", required=True)
+    k.add_argument("--role", choices=["button", "link", "menuitem", "option", "radio", "tab", "checkbox", "combobox"])
+    k.add_argument("--contains", action="store_true", help="match the label as a substring")
+    f = ss.add_parser("fill", help="type into one visible field by its label (guarded)")
+    f.add_argument("--label", required=True)
+    f.add_argument("--value", required=True)
+    i = ss.add_parser("install-client", help="install a Desktop client JSON as <home>/client_secret.json")
+    i.add_argument("--file", help="path to the JSON (default: newest Desktop client in ~/Downloads)")
+    i.add_argument("--project", help="only accept a client from this project")
+    sa = ss.add_parser("auth", help="OAuth consent in the setup Chrome; stores the token")
+    sa.add_argument("--timeout", type=int, default=300)
     return ap
 
 
@@ -135,9 +161,41 @@ def cmd_categories(args, home) -> dict[str, Any]:
     return {"ok": True, "region": args.region, "categories": cats}
 
 
+def cmd_setup(args, home) -> dict[str, Any]:
+    from . import console
+    from . import setup as S
+    from .browser import session_for
+
+    session = session_for(home, args.port, args.profile_dir)
+    sc = args.setup_cmd
+    if sc is None:
+        return {"ok": False, "error": "usage: setup needs a step (browser, status, plan, goto, snapshot, click, fill, install-client, auth)"}
+    if sc == "browser":
+        return S.cmd_browser(home, session, args.project)
+    if sc == "status":
+        return S.cmd_status(home, session)
+    if sc == "plan":
+        project = args.project or S.suggested_project(home)
+        if not project:
+            return {"ok": False, "error": "no project ID: pass --project or download a client JSON first"}
+        return {"ok": True, "project": project, "steps": console.plan(project),
+                "then": ["yt-upload setup install-client", "yt-upload setup auth", "yt-upload status"]}
+    if sc == "goto":
+        return S.cmd_goto(session, args.step, args.project)
+    if sc == "snapshot":
+        return S.cmd_snapshot(session)
+    if sc == "click":
+        return S.cmd_click(session, args.text, args.role, not args.contains)
+    if sc == "fill":
+        return S.cmd_fill(session, args.label, args.value)
+    if sc == "install-client":
+        return S.cmd_install_client(home, args.file, args.project)
+    return S.cmd_auth(home, session, args.timeout)
+
+
 COMMANDS: dict[str, Callable[..., dict[str, Any]]] = {
     "auth": cmd_auth, "status": cmd_status, "upload": cmd_upload,
-    "readback": cmd_readback, "categories": cmd_categories,
+    "readback": cmd_readback, "categories": cmd_categories, "setup": cmd_setup,
 }
 
 
@@ -151,6 +209,8 @@ def run(argv: list[str] | None = None) -> int:
         return 2
     from .api import error_details
     from .auth import AuthError
+    from .clientfile import InstallError
+    from .console import GuardError
     from .meta import MetaError
     from .paths import ConfigError, resolve_home
     from .upload import UploadRefused
@@ -165,7 +225,7 @@ def run(argv: list[str] | None = None) -> int:
         out = {"ok": False, "error": str(e), "needs_auth": e.needs_auth}
     except UploadRefused as e:
         out = {"ok": False, "error": str(e), **e.extra}
-    except (PolicyError, ConfigError) as e:
+    except (PolicyError, ConfigError, GuardError, InstallError, ValueError) as e:
         out = {"ok": False, "error": str(e)}
     except Exception as e:  # noqa: BLE001 - one JSON object, whatever happens
         out = {"ok": False, "error": f"{args.cmd} failed", "error_detail": error_details(e)}

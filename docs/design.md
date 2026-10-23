@@ -51,6 +51,10 @@ owner                     agent / CLI                                   YouTube 
 | `api.py` | Build the API client; turn `HttpError` into structured, untruncated error details |
 | `upload.py` | Execute: resumable insert with retry, follow-up steps, ledger updates |
 | `readback.py` | Read the video back and compare it with the metadata |
+| `clientfile.py` | OAuth client JSON: detect Desktop vs web, find downloads, install with a backup of the replaced file |
+| `browser.py` | Guided setup: visible Chrome with its own profile and a 127.0.0.1 debugging port, own-browser check, reopening a closed window, a `webbrowser` controller that opens the OAuth consent in that Chrome |
+| `console.py` | Guided setup: Cloud console step URLs, read-only page snapshots, guarded click and fill |
+| `setup.py` | `yt-upload setup ...` commands |
 | `cli.py` | Command-line entry; every command prints exactly one JSON object |
 
 ## Safety rules
@@ -64,6 +68,17 @@ These are invariants. No change may break them.
 5. **Narrow write surface.** The tool calls exactly these write methods: `videos.insert`, `thumbnails.set`, `captions.insert`, `playlistItems.insert`. It never deletes, never updates existing videos, never touches channel settings and never creates playlists. A source-scan test enforces the forbidden calls.
 6. **Disclosures are explicit.** `made_for_kids` and `contains_synthetic_media` have no defaults; metadata without them is rejected.
 7. **Errors are passed through.** HTTP status, reason and message from Google are returned in the JSON, not replaced with a generic message.
+
+## Guided setup
+
+The one-time Cloud console configuration is the hardest part for most people, so `yt-upload setup` lets an agent do it in a browser the human can watch. The design follows the same rules as the rest of the tool:
+
+- A dedicated Chrome profile (`<home>/browser-profile`, 0700) and a debugging port bound to 127.0.0.1. Before every action the tool checks that the Chrome on that port was started with that profile; it never attaches to the person's everyday browser.
+- The human signs in. Google sign-in, account and consent pages are read-only for the tool: it neither types nor clicks there, and does not scrape them. Nothing reads, prints or exports cookies or storage.
+- The agent works through small primitives instead of a hard-coded script: `goto STEP --project ID` opens a known console URL with the project pinned in the query string (so a stale project selector cannot redirect it), `snapshot` returns headings, buttons with their disabled state, fields and alerts, `click --text` and `fill --label` act on exactly one visible control. Every action is followed by a fresh snapshot.
+- Guards: only `console.cloud.google.com` is driven; controls whose label matches delete, remove, disable, reset, revoke, billing, payment, upgrade, back to testing, make internal and similar are refused; password fields are refused.
+- The client JSON is installed by copying (the download stays where it is); a replaced `client_secret.json` is renamed to a timestamped backup, never deleted. Only a Desktop (`installed`) client is accepted.
+- If the human closes the window, Chrome on macOS keeps running without windows and CDP attach fails; the tool detects that there are no tabs and opens a new window. If Chrome has quit, `setup browser` relaunches it with the same profile, so the sign-in survives.
 
 ## OAuth setup decisions
 

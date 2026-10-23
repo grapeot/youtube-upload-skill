@@ -35,6 +35,33 @@ yt-upload upload --meta episode.json --execute     # upload private, thumbnail, 
 4. Read the result and report it faithfully: `video_id`, `url`, `studio_url`, each entry in `steps` (a failed thumbnail usually means the channel is not verified yet), `readback.mismatches`, `readback.unverified`, `readback.not_applied`, and `human_steps`.
 5. Hand over: the owner reviews the video in Studio and publishes or schedules it there.
 
+## Guided one-time setup
+
+Use this when `status` shows no Desktop client or no token. Needs Google Chrome and `uv pip install -e '.[setup]'`.
+
+```bash
+yt-upload setup status                      # local files, downloaded client JSONs (kind + project ID), browser and sign-in state
+yt-upload setup browser [--project ID]      # visible Chrome with its own profile; reopens a window if it was closed
+yt-upload setup plan [--project ID]         # the steps and their console URLs
+yt-upload setup goto api --project ID       # steps: project, api, branding, audience, clients
+yt-upload setup snapshot                    # read the current page again
+yt-upload setup click --text "Enable" [--role button]
+yt-upload setup fill --label "App name" --value "..."
+yt-upload setup install-client [--file PATH] [--project ID]   # default: newest Desktop client in ~/Downloads
+yt-upload setup auth                        # consent page opens in the same window; the human clicks Allow
+```
+
+Goal state, checked by reading each page back: the project in every snapshot is the intended one; YouTube Data API v3 shows "API Enabled"; Branding has an app name, a user support email and a developer contact email saved; Audience shows user type External and publishing status In production; a Desktop client JSON is installed (`setup status` shows `client_secret.kind == "installed"`); `yt-upload status` shows the channel.
+
+Rules for this part:
+
+- The human signs in, and the human clicks on Google's consent page. Tell them exactly what to do in the window, then wait. Never type credentials.
+- Pick the project from the client JSON's `project_id` or ask the human. Always pass `--project`: the console's own project selector can point at a different project.
+- Change only what the goal needs, in the project the human chose. Do not rename or reconfigure an app that is clearly used for something else (an existing app name, other scopes under Data Access); report it and let the human decide whether to use that project or a new one.
+- If "Publish app" stays disabled with a pointer to Branding, read Branding and Data Access: a missing app name or contact email, or restricted or sensitive scopes left over from earlier use (which then require home page and privacy policy links), are the usual causes.
+- The tool refuses delete, remove, disable, reset and billing controls. Do not look for ways around that.
+- If a command returns `reopened_window: true`, the human had closed the window; the sign-in normally survives. If it says the browser is not running, run `setup browser` again.
+
 ## Metadata format
 
 One UTF-8 JSON object. Relative paths resolve against the metadata file's directory.

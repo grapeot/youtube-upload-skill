@@ -46,8 +46,12 @@ def token_scopes(home: Home) -> list[str]:
     return []
 
 
-def run_flow(home: Home, timeout: int | None = None, open_browser: bool = True):
-    """Interactive consent in the browser; stores the token (0600). Returns Credentials."""
+def run_flow(home: Home, timeout: int | None = None, open_browser: bool = True, browser: str | None = None):
+    """Interactive consent in the browser; stores the token (0600). Returns Credentials.
+
+    `browser` names a registered `webbrowser` controller (the guided setup registers one that
+    opens the consent page in its own visible Chrome).
+    """
     from google_auth_oauthlib.flow import InstalledAppFlow
 
     harden(home)
@@ -66,6 +70,8 @@ def run_flow(home: Home, timeout: int | None = None, open_browser: bool = True):
     kwargs: dict[str, Any] = {"port": 0, "open_browser": open_browser}
     if timeout is not None:
         kwargs["timeout_seconds"] = timeout
+    if browser is not None:
+        kwargs["browser"] = browser
     # The flow prints the consent URL; keep stdout for the single JSON result.
     with redirect_stdout(sys.stderr):
         creds = flow.run_local_server(**kwargs)
