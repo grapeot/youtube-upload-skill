@@ -284,3 +284,10 @@ def test_401_is_answered_by_a_token_refresh():
     assert refreshed == [True]
     auth_headers = [h.get("authorization") or h.get("Authorization") for (u, m, b, h) in inner.request_sequence]
     assert auth_headers == ["Bearer old-access", "Bearer new-access"]
+
+
+def test_entry_marked_deleted_does_not_block_a_new_upload(meta, book, opts):
+    entry = book.start(file_sha256(meta.video), meta.video, 256, meta.title, "private")
+    book.update(entry, state="deleted", video_id="VID000")
+    out, _ = run(meta, book, opts, [CHANNEL, *upload_ok(), *follow_ups_ok(), *readback_ok(meta)])
+    assert out["ok"] is True and out["mode"] == "new"

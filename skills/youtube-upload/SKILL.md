@@ -147,3 +147,4 @@ Default project quota: `videos.insert` has its own bucket of 100 calls per day; 
 - `thumbnail` step failed with `forbidden`: the channel is not verified for custom thumbnails. Verify it in YouTube Studio > Settings > Channel > Feature eligibility, then `--resume`.
 - Long video refused: same verification, it unlocks uploads over 15 minutes.
 - Session expired on `--resume`: Google keeps an upload session for about a week. Use `--new-upload`.
+- The owner deleted an uploaded video in Studio and wants to upload the file again: either pass `--new-upload`, or set that entry's `state` to `"deleted"` in `uploads.json` in the config directory (entries in any state other than `uploading` / `uploaded` are ignored by the duplicate guard).

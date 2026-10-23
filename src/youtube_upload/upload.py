@@ -68,6 +68,8 @@ def decide_mode(prior: dict[str, Any] | None, opts: Options) -> str:
     """'new', 'resume_session' or 'follow_ups'. Raises UploadRefused for duplicates."""
     if opts.resume and opts.new_upload:
         raise UploadRefused("--resume and --new-upload are mutually exclusive")
+    if prior is not None and prior.get("state") not in (L.UPLOADING, L.UPLOADED):
+        prior = None  # e.g. marked "deleted" by hand after the owner removed the video in Studio
     if prior is None:
         if opts.resume:
             raise UploadRefused("nothing to resume: this file has no recorded upload")
