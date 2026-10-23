@@ -19,7 +19,7 @@ Tests are fully offline. They never contact Google and need no credentials: API 
 
 1. **Default branch is `master`.** Every change goes through a feature branch and a PR into `master`.
 2. **Never public, never scheduled.** Visibility values are named only in `src/youtube_upload/policy.py`. Do not write the literal `public` or the field `publishAt` anywhere else under `src/`; `tests/test_source_scan.py` fails if you do. Do not add a metadata key for visibility or scheduling. `unlisted` is reachable only through the per-run `--visibility unlisted` flag.
-3. **Narrow write surface.** The only write calls are `videos.insert`, `thumbnails.set`, `captions.insert` and `playlistItems.insert`. No delete, no `videos.update`, no channel, playlist, watermark or banner writes. The source scan enforces this too.
+3. **Narrow write surface.** The only write calls are `videos.insert`, `thumbnails.set`, `captions.insert` and `playlistItems.insert`. No delete, no `videos.update`, no channel, playlist, watermark or banner writes. The source scan enforces this, and so does `api.GuardedHttp` at the transport: keep every client built through `api.build_service`.
 4. **`upload` is dry-run by default.** Only `--execute` touches the network. The duplicate guard (sha256 ledger) must stay in front of every new `videos.insert`.
 5. **Credentials never leave the config directory.** Tokens, client secrets and resumable session URLs are never printed, logged, put in JSON output or committed. The config directory must not be inside a git repository.
 6. **One JSON object per command.** Every `yt-upload` subcommand, including on error, prints exactly one JSON object to stdout (`--help` excepted). Progress and OAuth prompts go to stderr.

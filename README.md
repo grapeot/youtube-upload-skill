@@ -24,7 +24,7 @@ Full design and safety rules: `docs/design.md`.
 You need a YouTube channel and your own Google Cloud OAuth client. Roughly 20 minutes.
 
 1. **Channel.** Sign in to YouTube with the Google account that owns the channel and create the channel if it does not exist yet. In YouTube Studio, open Settings > Channel > Feature eligibility and verify with a phone number. Without this, videos longer than 15 minutes and custom thumbnails are not allowed.
-2. **Cloud project.** In the [Google Cloud console](https://console.cloud.google.com/), create a new project used only for this tool.
+2. **Cloud project.** In the [Google Cloud console](https://console.cloud.google.com/), create a new project used only for this tool. Reusing an older project works, but if its consent screen already declares sensitive or restricted scopes (for example Gmail scopes), Google will not let you publish it until the Branding page has a home page and a privacy policy link, and the consent page will show that project's existing app name.
 3. **Enable the API.** APIs & Services > Library > search "YouTube Data API v3" > Enable.
 4. **Consent screen.** Open Google Auth Platform (APIs & Services > OAuth consent screen) and click Get started: any app name, your own support and contact email, audience **External**. Then go to Google Auth Platform > Audience and click **Publish app**, so the publishing status reads **In production**. You do not need to submit the app for verification. In Testing status, refresh tokens expire after 7 days and you would have to re-authorize every week.
 5. **OAuth client.** Google Auth Platform > Clients > Create client > Application type **Desktop app**. Download the JSON and save it as `~/.youtube-upload/client_secret.json`:
@@ -39,9 +39,13 @@ You need a YouTube channel and your own Google Cloud OAuth client. Roughly 20 mi
 
 The config directory can be changed with `--home` or `YT_UPLOAD_HOME`; it must be outside any git repository.
 
+### Guided setup
+
+Steps 2 to 6 can be done with your agent instead of by hand. Install the optional browser dependency (`uv pip install -e '.[setup]'`; it uses your installed Google Chrome, no browser download), then ask the agent to run the guided setup from `skills/youtube-upload/SKILL.md`. It opens a separate, visible Chrome window with its own profile. You sign in to Google there; the agent then opens each Cloud console page for your project, enables the API, fills in the branding fields, publishes the consent screen, installs the Desktop client JSON, and opens the OAuth consent page in the same window, where you click Allow. The agent never types into Google's sign-in or consent pages, refuses delete, disable, reset and billing controls (and any click while a dialog mentions them), and scrubs client secrets from what it reads. Quit that Chrome window when setup is done. If you close that window, the agent reopens it; the sign-in is kept in the profile.
+
 ## Install
 
-Requires Python 3.10 or newer and [uv](https://github.com/astral-sh/uv). `ffprobe` (from ffmpeg) is optional; when present, the tool checks chapter lengths and the 15-minute limit against the real duration.
+Requires Python 3.10 or newer and [uv](https://github.com/astral-sh/uv). The guided setup additionally needs Google Chrome and the `setup` extra. `ffprobe` (from ffmpeg) is optional; when present, the tool checks chapter lengths and the 15-minute limit against the real duration.
 
 ```bash
 git clone https://github.com/grapeot/youtube-upload-skill
