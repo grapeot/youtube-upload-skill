@@ -60,14 +60,16 @@ def _driven_page(ctx, create: bool = True):
 
 
 def _with_page(session: B.Session, fn, create: bool = True) -> dict[str, Any]:
-    from playwright.sync_api import sync_playwright
-
     own = B.verify_own_browser(session)
     if not own["ok"]:
         if not B.port_in_use(session.port):
             own["hint"] = ("the setup browser is not running (closed or quit); run `yt-upload setup browser` "
                            "to relaunch it with the same profile, which keeps the Google sign-in")
         return own
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return {"ok": False, "error": "the guided setup needs Playwright: uv pip install -e '.[setup]'"}
     reopened = B.ensure_window(session)
     with sync_playwright() as p:
         _, ctx = B.connect(p, session)
