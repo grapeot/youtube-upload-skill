@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.pytest_cache/
+dist/
+build/
+.DS_Store
+
+# OAuth client secrets, tokens and the upload ledger live outside the repo
+# (default ~/.youtube-upload/). Never commit them, even by accident.
+.youtube-upload/
+client_secret*.json
+client_secrets*.json
+token*.json
+uploads*.json
+credentials*.json
+.env
+.env.*
+!.env.example
+
+# Local work products
+.local/
+outputs/
+*.log
+
+# Media: videos, thumbnails, subtitles
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.avi
+*.m4v
+*.mp3
+*.m4a
+*.wav
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.srt
+*.vtt
+
+# Upload metadata may contain personal details; only test fixtures and examples are tracked
+*.json
+!tests/fixtures/*.json
+!examples/*.example.json

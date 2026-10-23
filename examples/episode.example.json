@@ -1,0 +1,24 @@
+{
+  "video": "/path/to/video.mp4",
+  "title": "Episode title",
+  "description": "First paragraph.\n\nSecond paragraph.",
+  "chapters": [
+    {"start": 0, "title": "Intro"},
+    {"start": "01:30", "title": "Main part"},
+    {"start": "05:00", "title": "Wrap-up"}
+  ],
+  "tags": ["tag one", "tag two"],
+  "category": "28",
+  "language": "en",
+  "audio_language": "en",
+  "cover": "thumbnail.jpg",
+  "subtitles": [
+    {"path": "subtitles.en.srt", "language": "en", "name": "English"}
+  ],
+  "playlist_id": "PLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "made_for_kids": false,
+  "contains_synthetic_media": false,
+  "license": "youtube",
+  "embeddable": true,
+  "notify_subscribers": false
+}
