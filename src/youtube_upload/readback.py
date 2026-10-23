@@ -72,7 +72,11 @@ def compare(fields: dict[str, Any], meta: UploadMeta, visibility: str | None) ->
     check("title", meta.title, fields["title"])
     check("description", render_description(meta.description, meta.chapters), fields["description"])
     if sorted(fields["tags"] or []) != sorted(meta.tags):
-        mismatches.append({"field": "tags", "expected": meta.tags, "actual": fields["tags"]})
+        if not fields["tags"] and fields.get("processing_status") == "processing":
+            # Observed on a real upload: tags come back empty until processing finishes.
+            unverified.append("tags")
+        else:
+            mismatches.append({"field": "tags", "expected": meta.tags, "actual": fields["tags"]})
     if meta.category:
         check("category", meta.category, fields["category"])
     if meta.language:
@@ -80,6 +84,8 @@ def compare(fields: dict[str, Any], meta: UploadMeta, visibility: str | None) ->
     if visibility is not None:
         check("visibility", visibility, fields["visibility"])
     check("made_for_kids", meta.made_for_kids, fields["made_for_kids"])
+    # videos.list does not return containsSyntheticMedia in practice; it lands in `unverified` and the
+    # human checks the disclosure in Studio (see HUMAN_STEPS).
     check("contains_synthetic_media", meta.contains_synthetic_media, fields["contains_synthetic_media"])
     check("license", meta.license, fields["license"])
     check("embeddable", meta.embeddable, fields["embeddable"])

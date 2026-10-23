@@ -132,7 +132,7 @@ Every command prints exactly one JSON object to stdout, including on errors; pro
 - `ok`: true only when the upload, every follow-up step and the readback all succeeded.
 - `mode`: `new`, `resume_session` or `follow_ups`.
 - `steps[]`: `{step, ok, error?}`; a failed step does not stop the others, and `--resume` retries only failed or missing steps (a caption or playlist step that may have landed is checked before it is retried, so no duplicates).
-- `readback`: `mismatches` (present and different), `unverified` (the API did not return the field), `not_applied` (best-effort fields such as `audio_language`, with how to fix them in Studio).
+- `readback`: `mismatches` (present and different), `unverified` (the API did not return the field), `not_applied` (best-effort fields such as `audio_language`, with how to fix them in Studio). Right after an upload, while processing is still running, tags can come back empty; they are listed as `unverified` then, and a later `readback` shows them. `contains_synthetic_media` is not returned by `videos.list`, so it is always `unverified`: ask the owner to confirm the disclosure in Studio.
 - On an insert failure: `error_detail` carries Google's status, reason and message; `next` says whether to `--resume` or `--new-upload`.
 - Refusals (duplicate, interrupted upload, long video on an unverified channel, no channel) come back as `ok: false` with an `error` explaining the flag to use.
 

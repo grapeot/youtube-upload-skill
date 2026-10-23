@@ -47,3 +47,19 @@ def test_readback_not_found_and_failed_upload(write_meta, good_meta):
     service, _ = mock_service([video_item(meta, uploadStatus="rejected", rejectionReason="duplicate")])
     out = readback(service, "VID123")
     assert out["ok"] is False and out["fields"]["rejection_reason"] == "duplicate"
+
+
+def test_empty_tags_while_processing_are_unverified_not_mismatched(write_meta, good_meta):
+    import json
+    meta = load_meta(write_meta(good_meta))
+    item = video_item(meta)
+    body = json.loads(item[1])
+    body["items"][0]["snippet"]["tags"] = []
+    responses = [(item[0], json.dumps(body)), *readback_ok(meta)[1:]]
+    service, _ = mock_service(responses)
+    out = readback(service, "VID123", meta, "private")
+    assert out["ok"] is True and "tags" in out["unverified"]
+    body["items"][0]["processingDetails"]["processingStatus"] = "succeeded"
+    service, _ = mock_service([(item[0], json.dumps(body)), *readback_ok(meta)[1:]])
+    out = readback(service, "VID123", meta, "private")
+    assert out["ok"] is False and out["mismatches"][0]["field"] == "tags"

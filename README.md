@@ -24,7 +24,7 @@ Full design and safety rules: `docs/design.md`.
 You need a YouTube channel and your own Google Cloud OAuth client. Roughly 20 minutes.
 
 1. **Channel.** Sign in to YouTube with the Google account that owns the channel and create the channel if it does not exist yet. In YouTube Studio, open Settings > Channel > Feature eligibility and verify with a phone number. Without this, videos longer than 15 minutes and custom thumbnails are not allowed.
-2. **Cloud project.** In the [Google Cloud console](https://console.cloud.google.com/), create a new project used only for this tool.
+2. **Cloud project.** In the [Google Cloud console](https://console.cloud.google.com/), create a new project used only for this tool. Reusing an older project works, but if its consent screen already declares sensitive or restricted scopes (for example Gmail scopes), Google will not let you publish it until the Branding page has a home page and a privacy policy link, and the consent page will show that project's existing app name.
 3. **Enable the API.** APIs & Services > Library > search "YouTube Data API v3" > Enable.
 4. **Consent screen.** Open Google Auth Platform (APIs & Services > OAuth consent screen) and click Get started: any app name, your own support and contact email, audience **External**. Then go to Google Auth Platform > Audience and click **Publish app**, so the publishing status reads **In production**. You do not need to submit the app for verification. In Testing status, refresh tokens expire after 7 days and you would have to re-authorize every week.
 5. **OAuth client.** Google Auth Platform > Clients > Create client > Application type **Desktop app**. Download the JSON and save it as `~/.youtube-upload/client_secret.json`:
